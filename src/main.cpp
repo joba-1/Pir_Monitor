@@ -31,6 +31,8 @@ bool active = false;
 uint32_t active_since = 0;
 const uint32_t active_delay = 10000;  // keep active for /status page
 
+const uint32_t mail_delay = 60000;  // send mails at most once each minute
+
 
 /* Declare the global used SMTP objects */
 SMTPSession smtp;
@@ -108,7 +110,7 @@ bool sendAlarm( const char *msg ) {
   }
 
   char content[1024];
-  snprintf(content, sizeof(content), "PIR Alarm %u\n%s", count, msg);
+  snprintf(content, sizeof(content), "%s Alarm %u\n%s", HOSTNAME, count, msg);
   message.text.content = content;
 
   /* Start sending Email and close the session */
@@ -297,7 +299,7 @@ void setup() {
   String host(HOSTNAME);
   host.toLowerCase();
   WiFi.hostname(host.c_str());
-  WiFi.mode(WIFI_STA);  // after hostname()!
+  WiFi.mode(WIFI_STA);  // after WiFi.hostname() or dhcp gets default name "ESP..."!
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
@@ -330,7 +332,7 @@ void setup() {
   config.time.day_light_offset = 1;
 
   message.sender.name = "ESP Pir Monitor";
-  message.subject = "ESP Pir Alarm";
+  message.subject = "Alarm on " HOSTNAME;
   message.text.charSet = "us-ascii";
   message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
   message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_high;
@@ -343,8 +345,7 @@ void setup() {
 
 
 void loop() {
-  const uint32_t min_interval = 60000;  // send mails at most once each minute
-  static uint32_t last_send = -min_interval;
+  static uint32_t last_send = -mail_delay;
 
   uint32_t now = millis();
   int new_status = digitalRead(PIR_PIN);
@@ -353,10 +354,10 @@ void loop() {
     digitalWrite(LED_PIN, pir_status);
     Serial.printf("PIR Status: %d\n", pir_status);
 
-    if (pir_status == HIGH ) {
+    if (pir_status == HIGH) {
       active = true;
 
-      if (now - last_send > min_interval) {
+      if (now - last_send > mail_delay) {
         if (sendAlarm("Movement detected!")) {
           now = millis();
           last_send = now;
