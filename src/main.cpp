@@ -322,6 +322,8 @@ void setup() {
   }
   Serial.printf("\nConnected %s with IP %s\n", WiFi.getHostname(), WiFi.localIP().toString().c_str());
 
+  configTime(3600, 3600, "pool.ntp.org");
+
   esp_updater.setup(&web_server);
   setup_webserver();
 
@@ -352,6 +354,12 @@ void setup() {
 
 void loop() {
   static uint32_t last_send = -mail_delay;
+  static bool valid_time = false;
+
+  if(!valid_time && time(nullptr) >= ESP_MAIL_CLIENT_VALID_TS) {
+    Serial.println("Got valid time");
+    valid_time = true;
+  }
 
   uint32_t now = millis();
   int new_status = digitalRead(PIR_PIN);
