@@ -33,6 +33,7 @@ const uint32_t active_delay = 10000;  // keep active for /status page
 
 const uint32_t mail_delay = 60000;  // send mails at most once each minute
 
+volatile bool send_message = false;
 
 /* Declare the global used SMTP objects */
 SMTPSession smtp;
@@ -83,46 +84,36 @@ void smtpCallback( SMTP_Status status ) {
 }
 
 
-bool sendAlarm( const char *msg ) {
-  static unsigned count = 1;
-
-  if (!(sender[0] && password[0] && receiver[0] && email[0])) {
-    return false;
+void sendTaskCode( void * ) {
+  while (true) {
+    if (send_message) {
+      if (!smtp.connected() && !smtp.connect(&config)) {
+        Serial.printf("Connection error, Status Code: %d, Error Code: %d, Reason: %s\n", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+      }
+      else {
+        if (!MailClient.sendMail(&smtp, &message) ) {
+          Serial.printf("Send error, Status Code: %d, Error Code: %d, Reason: %s\n", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
+        }
+        else {
+          smtp.closeSession();
+          send_message = false;
+        }
+      }
+    }
+    delay(100);
   }
+}
 
-  web_server.handleClient();
 
-  if (!smtp.connected() && !smtp.connect(&config)) {
-    Serial.printf("Connection error, Status Code: %d, Error Code: %d, Reason: %s\n", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-    return false;
-  }
-
-  web_server.handleClient();
-
-  if (!smtp.isLoggedIn()) {
-    Serial.println("\nNot yet logged in.");
-  }
-  else {
-    if (smtp.isAuthenticated())
-      Serial.println("\nSuccessfully logged in.");
-    else
-      Serial.println("\nConnected with no Auth.");
-  }
-
-  char content[1024];
-  snprintf(content, sizeof(content), "%s Alarm %u\n%s", HOSTNAME, count, msg);
-  message.text.content = content;
-
-  /* Start sending Email and close the session */
-  if (!MailClient.sendMail(&smtp, &message) ) {
-    Serial.printf("Send error, Status Code: %d, Error Code: %d, Reason: %s\n", smtp.statusCode(), smtp.errorCode(), smtp.errorReason().c_str());
-    return false;
-  }
-
+void sendAlarm( const char *msg ) {
+  static unsigned count = 0;
   count++;
-  smtp.closeSession();
-
-  return true;
+  if (sender[0] && password[0] && receiver[0] && email[0]) {
+    char content[1024];
+    snprintf(content, sizeof(content), "%s Alarm %u\n%s", HOSTNAME, count, msg);
+    message.text.content = content;
+    send_message = true;
+  }
 }
 
 
@@ -249,7 +240,8 @@ void setup_webserver() {
   });
 
   web_server.on("/test", HTTP_POST, []() {
-    Serial.printf("Send test mail %s\n", sendAlarm("Test") ? "done" : "failed");
+    sendAlarm("Test");
+    Serial.println("Send test mail initiated");
     web_server.sendHeader("Location", "/", true);  
     web_server.send(302, "text/plain", "");
   });
@@ -335,9 +327,6 @@ void setup() {
   config.server.host_name = SMTP_HOST;
   config.server.port = SMTP_PORT;
   config.login.user_domain = "";
-  config.time.ntp_server = "pool.ntp.org,time.nist.gov";
-  config.time.gmt_offset = 1;
-  config.time.day_light_offset = 1;
 
   message.sender.name = "ESP Pir Monitor";
   message.subject = "Alarm on " HOSTNAME;
@@ -347,6 +336,10 @@ void setup() {
   message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
 
   update_config();
+
+  UBaseType_t prio = uxTaskPriorityGet(NULL) - 1;
+  BaseType_t core = 1 - xPortGetCoreID();
+  xTaskCreatePinnedToCore(sendTaskCode, "SendTask", 10000, NULL, prio, NULL, core);
 
   Serial.println("Init done");
 }
@@ -372,13 +365,8 @@ void loop() {
       active = true;
 
       if (now - last_send > mail_delay) {
-        if (sendAlarm("Movement detected!")) {
-          now = millis();
-          last_send = now;
-        }
-        else {
-          Serial.println("Send mail failed");
-        }
+        sendAlarm("Movement detected!");
+        last_send = now;
       }
 
       active_since = now;
