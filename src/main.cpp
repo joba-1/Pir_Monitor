@@ -172,7 +172,7 @@ const char *main_page() {
     "   <tr><td>App Password</td><td><input type=\"password\" id=\"password\" name=\"password\" value=\"%s\" /></td><td>16 characters</td></tr>\n"
     "   <tr><td>Receiver Name</td><td><input type=\"text\" id=\"receiver\" name=\"receiver\" value=\"%s\" /></td><td>your choice</td></tr>\n"
     "   <tr><td>Receiver Email</td><td><input type=\"text\" id=\"email\" name=\"email\" value=\"%s\" /></td><td>full email</td></tr>\n"
-    "   <tr><td><input type=\"submit\" name=\"config\" value=\"Set Config\" /></td><td></td><td></tr>\n"
+    "   <tr><td><input type=\"submit\" name=\"config\" value=\"Set Config\" /></td><td><input type=\"submit\" name=\"test\" value=\"Test Config\" /></td><td></td></tr>\n"
     "  </form></table>\n"
     "  <p><table>\n"
     "   <tr><td>Post firmware image to</td><td><a href=\"/update\">/update</a></td></tr>\n"
@@ -182,8 +182,8 @@ const char *main_page() {
     "   <td><form action=\"restart\" method=\"post\">\n"
     "    <input type=\"submit\" name=\"restart\" value=\"Restart device\" />\n"
     "   </form></td>\n"
-    "   <td><form action=\"test\" method=\"post\">\n"
-    "    <input type=\"submit\" name=\"test\" value=\"Test email\" />\n"
+    "   <td><form action=\"reset\" method=\"post\">\n"
+    "    <input type=\"submit\" name=\"reset\" value=\"Reset WLAN\" />\n"
     "   </form></td>\n"
     "  </tr></table></p>\n"
     "  <p><small>... by <a href=\"https://github.com/joba-1/Pir_Monitor\">Joachim Banzhaf</a>, " __DATE__ " " __TIME__ "</small></p>\n"
@@ -230,20 +230,39 @@ void setup_webserver() {
         changed |= update_arg(web_server.arg(i).c_str(), email, sizeof(email));
       }
     }
+
     if (changed) {
       update_config();
       email_config(true);
+    }
+
+    if (web_server.hasArg("test")) {
+      sendAlarm("Test");
+      Serial.println("Send test mail initiated");
     }
 
     web_server.sendHeader("Location", "/", true);  
     web_server.send(302, "text/plain", "");
   });
 
-  web_server.on("/test", HTTP_POST, []() {
-    sendAlarm("Test");
-    Serial.println("Send test mail initiated");
-    web_server.sendHeader("Location", "/", true);  
-    web_server.send(302, "text/plain", "");
+  web_server.on("/reset", HTTP_POST, []() {
+    Serial.println("Reset WLAN config on web request");
+    
+    WiFiManager wm;
+    wm.resetSettings();
+    
+    web_server.send(200, "text/html",
+      "<html>\n"
+      " <head>\n"
+      "  <title>" PROGNAME " v" VERSION " Reset WLAN Config</title>\n"
+      "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+      "  <meta charset=\"utf-8\">\n"
+      "  <link href=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAgMAAABinRfyAAAADFBMVEUqYbutnpTMuq/70SQgIef5AAAAVUlEQVQIHWOAAPkvDAyM3+Y7MLA7NV5g4GVqKGCQYWowYTBhapBhMGB04GE4/0X+M8Pxi+6XGS67XzzO8FH+iz/Dl/q/8gx/2S/UM/y/wP6f4T8QAAB3Bx3jhPJqfQAAAABJRU5ErkJggg==\" rel=\"icon\" type=\"image/x-icon\" />\n"
+      "  <meta http-equiv=\"refresh\" content=\"7; url=/\"> \n"
+      " </head>\n"
+      " <body><h1>Reset WLAN Config</h1></body>\n"
+      "</html>\n");
+    restart("Reset WLAN config on web request");
   });
 
   web_server.on("/restart", HTTP_POST, []() {
@@ -306,7 +325,6 @@ void setup() {
   email_config();
 
   WiFiManager wm;
-  // wm.resetSettings();
   wm.setHostname(host);
   wm.setConfigPortalTimeout(180);
   if (!wm.autoConnect(WiFi.getHostname(), WiFi.getHostname())) {
@@ -314,7 +332,7 @@ void setup() {
   }
   Serial.printf("\nConnected %s with IP %s\n", WiFi.getHostname(), WiFi.localIP().toString().c_str());
 
-  configTime(3600, 3600, "pool.ntp.org");
+  configTime(3600, 3600, "pool.ntp.org");  // MESZ
 
   esp_updater.setup(&web_server);
   setup_webserver();
